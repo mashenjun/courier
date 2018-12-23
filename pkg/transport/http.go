@@ -34,17 +34,22 @@ func decodeHTTPSubscribeRequest(ctx context.Context, r *http.Request) (interface
 	return req, nil
 }
 
-func decodeHTTPSendRequest(ctx context.Context, r *http.Request) (interface{}, error) {
+func decodeHTTPSendRequest(_ context.Context, r *http.Request) (interface{}, error) {
 	var req service.SendReq
-	key := mux.Vars(r)["key"]
-	req.Key = key
+	req.Key = mux.Vars(r)["key"]
 	tmp :=  map[string]interface{}{}
 	err := json.NewDecoder(r.Body).Decode(&tmp)
 	req.Data = tmp
 	return req, err
 }
 
-func encodeHTTPGenericResponse(ctx context.Context, w http.ResponseWriter, resp interface{}) error {
+func decodeHTTPCloseRequest(_ context.Context, r *http.Request) (interface{}, error) {
+	var req service.CloseReq
+	req.Key = mux.Vars(r)["key"]
+	return req, nil
+}
+
+func encodeHTTPGenericResponse(_ context.Context, w http.ResponseWriter, resp interface{}) error {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	response := struct {
 		ErrorCode int         `json:"error_code"`
@@ -54,15 +59,13 @@ func encodeHTTPGenericResponse(ctx context.Context, w http.ResponseWriter, resp 
 	return json.NewEncoder(w).Encode(response)
 }
 
-func encodeError(ctx context.Context, err error, w http.ResponseWriter) {
+func encodeError(_ context.Context, err error, w http.ResponseWriter) {
 	// process the given error and set status code
-
 	if sErr, ok := err.(*com.ServiceError); ok {
 		w.WriteHeader(sErr.StatusCode)
-
 	}else {
 		w.WriteHeader(http.StatusInternalServerError)
-		err = com.ParameterError
+		err = com.ParameterError // error here go to parameter invalid
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	json.NewEncoder(w).Encode(err)
@@ -82,7 +85,7 @@ func NewHTTPHandler(endpoints endpoint.Endpoints, logger log.Logger, tracer *std
 		options...,
 	)).Methods(http.MethodGet)
 	r.HandleFunc("/subscribe",  func(w http.ResponseWriter,
-		r *http.Request){
+		r *http.Request){ // very important here to enable ws upgrade
 			httpSrv := httptransport.NewServer(
 				endpoints.SubscribeEndpoint,
 				decodeHTTPSubscribeRequest,
@@ -96,6 +99,12 @@ func NewHTTPHandler(endpoints endpoint.Endpoints, logger log.Logger, tracer *std
 	r.Handle("/send/{key}", httptransport.NewServer(
 		endpoints.SendEndpoint,
 		decodeHTTPSendRequest,
+		encodeHTTPGenericResponse,
+		options...,
+		)).Methods(http.MethodPost)
+	r.Handle("/close/{key}", httptransport.NewServer(
+		endpoints.CloseEndpoint,
+		decodeHTTPCloseRequest,
 		encodeHTTPGenericResponse,
 		options...,
 		)).Methods(http.MethodPost)
